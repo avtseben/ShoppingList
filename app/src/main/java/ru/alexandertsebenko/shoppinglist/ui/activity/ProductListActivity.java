@@ -1,13 +1,7 @@
 package ru.alexandertsebenko.shoppinglist.ui.activity;
 
-import android.content.ContentProvider;
-import android.content.ContentProviderClient;
-import android.content.Intent;
-import android.database.Cursor;
-import android.net.Uri;
+import android.content.Context;
 import android.os.Bundle;
-import android.os.RemoteException;
-import android.provider.ContactsContract;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v7.app.AppCompatActivity;
@@ -17,12 +11,27 @@ import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+
 import io.realm.Realm;
 import io.realm.RealmConfiguration;
-import io.realm.exceptions.RealmPrimaryKeyConstraintException;
+import io.realm.RealmResults;
+import io.realm.exceptions.RealmException;
 import ru.alexandertsebenko.shoppinglist.R;
-import ru.alexandertsebenko.shoppinglist.datamodel.Pack;
-import ru.alexandertsebenko.shoppinglist.datamodel.ProductCategory;
+import ru.alexandertsebenko.shoppinglist.datamodel.simplemodel.DataVersion;
+import ru.alexandertsebenko.shoppinglist.datamodel.simplemodel.Product;
 
 public class ProductListActivity extends AppCompatActivity {
 
@@ -45,7 +54,6 @@ public class ProductListActivity extends AppCompatActivity {
         // Open the Realm for the UI thread.
         mRealm = Realm.getInstance(mRealmConfig);
 
-        basicCRUD(mRealm);
 
         FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
         fab.setOnClickListener(new View.OnClickListener() {
@@ -80,82 +88,76 @@ public class ProductListActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
     private void fabClicked() {
-        /** Temporary commented. Need more develop
-/*        Intent intent = new Intent(this, AddNewProductActivity.class);
-        startActivity(intent);*/
-
-/*        Cursor c = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,null,null,null,null);
-        while (c.moveToNext()) {
-            String name = c.getString(c.getColumnIndex("name_for_primary_account"));
-            String phoneNumber = c.getString(c.getColumnIndex("data1"));
-
-            Log.d("contactCursor",name + " : "+ phoneNumber);
-        }*/
-        Uri requestUri = Uri.parse("content://ru.alexandertsebenko.yr_mind_fixer.provider.notes/text_notes");
-        ContentProviderClient client = getContentResolver().acquireContentProviderClient(requestUri);
-
-        Cursor c = null;
+        String jsonStr;
         try {
-            c = client.query(requestUri,
-                    new String[]{"text_note"},
-                    "note_title LIKE ?",
-                    new String[] {"%купить%"},null);
-        } catch (RemoteException e) {
+            jsonStr = readFileFromResToSring(R.raw.data);
+            fromJsonToRealm(jsonStr,mRealm);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (JSONException e) {
             e.printStackTrace();
         }
-        while (c.moveToNext()) {
-            String text = c.getString(0);
-
-            Log.d("MyPro",text);
+       //Debug
+        RealmResults<Product> allData = mRealm.where(Product.class).findAll();
+        RealmResults<DataVersion> dvr = mRealm.where(DataVersion.class).findAll();
+        DataVersion dv = mRealm.where(DataVersion.class).findFirst();
+        Log.d("MuLog", "dv " + dv.version);
+        for (Product p : allData) {
+            Log.d("MyLog", p.getName());
         }
+
     }
     private void showStatus(String txt) {
         Log.i(TAG, txt);
     }
+    private String readFileFromResToSring(int resId) throws IOException {
+        Context context = getApplicationContext();
+        InputStream inputStream = getApplicationContext()
+                .getResources().openRawResource(resId);
+        BufferedReader br = new BufferedReader(
+                new InputStreamReader(inputStream));
+        StringBuilder sb = new StringBuilder();
+        String line = null;
+        while ((line = br.readLine()) != null) {
+            sb.append(line).append("\n");
+        }
+        inputStream.close();
+        br.close();
+        return sb.toString();
+    }
+    private boolean updateNeeded(int parsedVersion){
+        DataVersion currentVersion = mRealm.where(DataVersion.class).findFirst();
+        return currentVersion.version < parsedVersion;
+    }
+    private void fromJsonToRealm(final String jsonStr, Realm realm) throws JSONException,RealmException {
+        GsonBuilder gsonBuilder = new GsonBuilder();
+        Gson gson = gsonBuilder.create();
+        JSONObject jsonObject = new JSONObject(jsonStr);
+        final int ver = jsonObject.getInt("version");
+        Log.d("MyLog","ver" + ver);
+        if(updateNeeded(ver)) {
+//            if(true) {
 
-    private void basicCRUD(Realm realm){
-        // Delete all persons
-/*        realm.executeTransaction(new Realm.Transaction() {
-            @Override
-            public void execute(Realm realm) {
-                realm.delete(Product.class);
-                realm.delete(Pack.class);
-                realm.delete(ProductCategory.class);
-            }
-        });*/
-        //Add new
-        try {
+            JSONArray jsonArray = jsonObject.getJSONArray("Product");
+
+            //AllProducts to ArrayList
+            final ArrayList<Product> allProducts = gson.fromJson(jsonArray.toString(),
+                    new TypeToken<ArrayList<Product>>(){}.getType());
+
+            //To Realm
             realm.executeTransaction(new Realm.Transaction() {
                 @Override
                 public void execute(Realm realm) {
-                    // Add a pack
-                    Pack pack1 = realm.createObject(Pack.class);
-                    pack1.setName("пачка 800г");
-                    pack1.setWeight(800);
-                    Pack pack2 = realm.createObject(Pack.class);
-                    pack2.setName("пакет 900г");
-                    pack2.setWeight(900);
-                    Pack pack3 = realm.createObject(Pack.class);
-                    pack3.setName("кг");
-                    pack3.setWeight(1000);
-
-                    ProductCategory category1 = realm.createObject(ProductCategory.class);
-                    category1.setName("Крупы");
-                    category1.setStorage("сухое прохладное место");
-                    ProductCategory category2 = realm.createObject(ProductCategory.class);
-                    category2.setName("Кисломолочные продукты");
-                    category2.setStorage("Холодильник");
-                    ProductCategory category3 = realm.createObject(ProductCategory.class);
-                    category3.setName("Овощи");
-                    category3.setStorage("Холодильник");
-                    ProductCategory category4 = realm.createObject(ProductCategory.class);
-                    category4.setName("Мясо");
-                    category4.setStorage("Морозильная камера");
-
+                    try {
+//                        mRealm.copyToRealm(allProducts);
+                        DataVersion v = mRealm.createObject(DataVersion.class);
+                        v.version = ver;
+                    } catch (RealmException e) {
+                        e.printStackTrace();
+                        Log.d("Realm log", "ошибка при перекачке");
+                    }
                 }
             });
-        } catch (RealmPrimaryKeyConstraintException e) {
-            showStatus("Данные уже есть в таблице");
         }
     }
     @Override
